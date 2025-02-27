@@ -1,10 +1,8 @@
 package com.litvins.finance_tool
 
-import com.litvins.finance_tool.Transaction.Currency.Companion.toCurrency
-import org.apache.poi.hpsf.Decimal
+import com.litvins.finance_tool.matchers.TransactionMatcher
 import org.apache.poi.xssf.usermodel.XSSFSheet
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
-import org.apache.xmlbeans.impl.store.Cur
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
@@ -13,10 +11,6 @@ import org.springframework.context.event.ContextRefreshedEvent
 import org.springframework.stereotype.Component
 import java.io.File
 import java.io.FileInputStream
-import java.math.BigDecimal
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import java.util.*
 import kotlin.system.exitProcess
 
 
@@ -89,169 +83,8 @@ class ExcelProcessor(
     }
 }
 
-interface TransactionMatcher {
-    fun matches(input: String): Boolean
-
-    fun parseTransaction(message: SmsRawData): Transaction
-
-    fun parseDate(dateString: String): LocalDate {
-        return LocalDate.parse(
-            dateString,
-            DateTimeFormatter.ofPattern(
-                "MMMM d, yyyy 'at' hh:mma",
-                Locale.ENGLISH,
-            ))
-    }
-}
-
-@Component
-class IncomingTransactionMatcher : TransactionMatcher {
-
-    override fun matches(input: String): Boolean {
-        return input.startsWith("Incoming transfer")
-    }
-
-    override fun parseTransaction(message: SmsRawData): Transaction {
-        val regex = Regex(".*Amount ([\\d\\.]+) (\\w+);.*")
-
-        val result = regex.find(message.text)?.groupValues
-
-        val amount = result?.get(1) ?: throw IllegalArgumentException("EFKJSGFLKJ $message")
-
-        val currency = result[2]
-
-        return Transaction.IncomingTransferTransaction(
-            date = parseDate(message.dateTime),
-            amount = BigDecimal(amount),
-            currency = currency.toCurrency(),
-        )
-    }
-}
-
-@Component
-class OutgoingTransactionMatcher : TransactionMatcher {
-    override fun matches(input: String): Boolean {
-        return input.startsWith("Amount transfer")
-    }
-
-    override fun parseTransaction(message: SmsRawData): Transaction {
-        TODO("Not yet implemented")
-    }
-}
-
-@Component
-class ShoppingTransactionMatcher : TransactionMatcher {
-    override fun matches(input: String): Boolean {
-        return input.startsWith("Payment:")
-    }
-
-    override fun parseTransaction(message: SmsRawData): Transaction {
-        val regex = Regex("Payment: ([\\d\\.]+) (\\w+).*\\n.*\\n(.*).*")
-
-        val result = regex.find(message.text)?.groupValues
-
-        val amount = result?.get(1) ?: throw IllegalArgumentException("EFKJSGFLKJ $message")
-
-        val currency = result[2]
-
-
-        return Transaction.ShoppingTransaction(
-            date = parseDate(message.dateTime),
-            amount = BigDecimal(amount),
-            currency = currency.toCurrency(),
-            category = Transaction.Category.OTHER,
-            merchant = result[3],
-        )
-    }
-}
-
-@Component
-class CashTransactionMatcher : TransactionMatcher {
-    override fun matches(input: String): Boolean {
-        return input.startsWith("Amount transfer")
-    }
-
-    override fun parseTransaction(message: SmsRawData): Transaction {
-        TODO("Not yet implemented")
-    }
-}
-
 data class SmsRawData(
     val dateTime: String,
     val text: String,
     val sender: Double?,
 )
-
-sealed class Transaction(
-    val date: LocalDate,
-    val amount: BigDecimal,
-    val currency: Currency,
-    val category: Category,
-) {
-
-
-
-    class IncomingTransferTransaction(
-        date: LocalDate,
-        amount: BigDecimal,
-        currency: Currency,
-    ) : Transaction(date, amount, currency, Category.UNKNOWN)
-
-    class OutgoingTransferTransaction(
-        date: LocalDate,
-        amount: BigDecimal,
-        currency: Currency,
-    ) : Transaction(date, amount, currency, Category.UNKNOWN)
-
-    class ShoppingTransaction(
-        date: LocalDate,
-        amount: BigDecimal,
-        currency: Currency,
-        category: Category,
-        val merchant: String,
-    ) : Transaction(date, amount, currency, category){
-        override fun toString(): String {
-            return "Transaction(date=$date, amount=$amount, currency=$currency, category=$category, merchant=$merchant)"
-
-        }
-    }
-
-    class CashWithdrawalTransaction(
-        date: LocalDate,
-        amount: BigDecimal,
-        currency: Currency,
-    ) : Transaction(
-        date,
-        amount,
-        currency,
-        Category.CASH,
-    )
-
-    enum class Currency {
-        GEL,
-        USD,
-        EUR;
-
-        companion object {
-            fun parse(value: String): Currency {
-                return Currency.entries.firstOrNull { value == it.name }
-                    ?: throw IllegalArgumentException("ATATAT! $value")
-            }
-
-            fun String.toCurrency(): Currency {
-                return Currency.parse(this)
-            }
-        }
-    }
-
-    enum class Category {
-        CASH,
-        UNKNOWN,
-        OTHER,
-    }
-
-    override fun toString(): String {
-        return "Transaction(date=$date, amount=$amount, currency=$currency, category=$category)"
-    }
-}
-
